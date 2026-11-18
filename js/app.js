@@ -1,5 +1,5 @@
 import {COUNTRIES} from './countries.js';
-import {state, save, flush, subscribe, statusOf, been, setStatus, entry, cleanup, stats, BY, TOTAL, CONTINENTS, CONT_TOTAL, distanceKm, LAND_TOTAL, exportJSON, replaceState, resetAll, STATUS} from './store.js';
+import {state, save, flush, subscribe, statusOf, been, setStatus, entry, cleanup, stats, BY, TOTAL, CONTINENTS, CONT_TOTAL, distanceKm, LAND_TOTAL, exportJSON, replaceState, resetAll, STATUS, allTrips} from './store.js';
 import {WorldMap} from './map.js';
 import {icon} from './icons.js';
 import {confetti} from './confetti.js';
@@ -11,6 +11,7 @@ const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const app = $('#app');
 const fmt = n => n.toLocaleString('fr-FR');
+const fmtPop = n => n >= 1e9 ? (n / 1e9).toLocaleString('fr-FR', {maximumFractionDigits: 2}) + ' Md' : n >= 1e6 ? (n / 1e6).toLocaleString('fr-FR', {maximumFractionDigits: n >= 1e8 ? 0 : 1}) + ' M' : fmt(Math.round(n / 100) * 100);
 const fmtArea = n => n < 10 ? n.toLocaleString('fr-FR', {maximumFractionDigits: 2}) : fmt(Math.round(n));
 const pctFmt = (v, d = 0) => (v > 0 && v < 1 && d === 0 ? v.toFixed(1) : v.toFixed(d)).replace('.', ',');
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
@@ -33,7 +34,7 @@ function readColors() {
   return {land: g('--m-land'), land2: g('--m-land2'), ocean1: g('--m-ocean1'), ocean2: g('--m-ocean2'), border: g('--m-border'), coast: g('--m-coast'),
     grat: g('--m-grat'), glow1: g('--m-glow1'), glow2: g('--m-glow2'), light: g('--m-light'), shade: g('--m-shade'), rim: g('--m-rim'), sel: g('--m-sel'),
     glowMid: g('--m-glowmid'), selGlow: g('--m-selglow'), flash: g('--m-flash'), marker: g('--m-marker'), markerHalo: g('--m-halo'), wishFill: g('--m-wishfill'),
-    visited: g('--v'), lived: g('--l'), wish: g('--w'), bg: g('--bg')};
+    visited: g('--v'), lived: g('--l'), wish: g('--w'), bg: g('--bg'), h1: g('--h1'), h2: g('--h2'), h3: g('--h3'), h4: g('--h4'), h5: g('--h5')};
 }
 function makeStars() {
   const mk = (n, maxA, size) => {
@@ -51,13 +52,73 @@ function makeStars() {
   $('.stars.s2').style.backgroundSize = '900px 900px';
 }
 
+/* ---------------- map colouring ---------------- */
+let replaySet = null; // during replay: only these countries are lit
+function mapStatus(code) {
+  const s = statusOf(code);
+  if (replaySet) return replaySet.has(code) ? (s === 'l' ? 'l' : 'v') : null;
+  if (!s || s === 'w' || state.colorBy === 'status') return s;
+  const e = state.countries[code];
+  if (state.colorBy === 'trips') { const n = (e.visits || []).length; return n >= 5 ? 'h5' : n >= 3 ? 'h4' : n === 2 ? 'h3' : n === 1 ? 'h2' : 'h1'; }
+  return e.r ? 'h' + e.r : null;
+}
+const COLOR_MODES = {status: 'Statut', trips: 'Voyages', rating: 'Note'};
+function renderLegend() {
+  const m = state.colorBy || 'status'; const el = $('#legend');
+  const ramp = `<span class="ramp">${[1, 2, 3, 4, 5].map(i => `<i style="background:var(--h${i})"></i>`).join('')}</span>`;
+  el.innerHTML = m === 'status' ? `<span><i class="dot v"></i>Visité</span><span><i class="dot l"></i>Vécu</span><span><i class="dot w"></i>Envie</span>${icon('layers')}`
+    : m === 'trips' ? `<span class="lg-mode">Voyages</span><span>1</span>${ramp}<span>5+</span>${icon('layers')}`
+    : `<span class="lg-mode">Note</span><span>★1</span>${ramp}<span>★5</span>${icon('layers')}`;
+}
+function openColorBy() {
+  const html = () => `<h3 class="sh-title">Colorer la carte</h3><p class="sh-sub">Choisissez ce que les couleurs racontent.</p>
+    <div class="opts">${Object.entries({status: ['Statut', 'Visité, vécu, envie'], trips: ['Nombre de voyages', 'Plus c’est doré, plus vous y êtes allé'], rating: ['Votre note', 'Vos pays préférés en doré']}).map(([k, [t, d]]) =>
+      `<button class="opt ${state.colorBy === k ? 'on' : ''}" data-cb="${k}" aria-pressed="${state.colorBy === k}"><div><b>${t}</b><span>${d}</span></div>${state.colorBy === k ? icon('check') : ''}</button>`).join('')}</div>`;
+  openSheet(html, el => el.querySelectorAll('[data-cb]').forEach(b => b.onclick = () => {
+    state.colorBy = b.dataset.cb; save(); renderLegend(); map.request(); vib(6); closeSheet();
+    if (state.colorBy === 'trips' && !allTrips().length) toast('Ajoutez des dates de voyage pour nuancer la carte');
+    if (state.colorBy === 'rating' && !Object.values(state.countries).some(e => e.r)) toast('Notez vos pays pour voir vos préférés');
+  }), {name: 'colorby'});
+}
+$('#legend').onclick = () => openColorBy();
+
+/* ---------------- map search ---------------- */
+const msearch = $('#msearch'), mqIn = $('#mq'), mres = $('#mres');
+$('#zsearch').innerHTML = icon('search'); $('.ms-ic').outerHTML = icon('search'); $('#mqx').innerHTML = icon('x');
+function openSearch() {
+  closePeek(true); msearch.classList.add('show'); app.classList.add('searching');
+  mqIn.value = ''; mres.innerHTML = ''; setTimeout(() => mqIn.focus(), 60);
+  history.pushState({v: 'map', search: 1}, '');
+}
+function closeSearch(back = true) {
+  if (!msearch.classList.contains('show')) return;
+  msearch.classList.remove('show'); app.classList.remove('searching'); mqIn.blur();
+  if (back && history.state?.search) { popGuard = true; history.back(); }
+}
+function hl(t, q) { const n = norm(t); const i = q ? n.indexOf(q) : -1; return i < 0 ? esc(t) : esc(t.slice(0, i)) + '<mark>' + esc(t.slice(i, i + q.length)) + '</mark>' + esc(t.slice(i + q.length)); }
+function searchResults(q) {
+  const nq = norm(q.trim()); if (!nq) return [];
+  const sc = c => { const n = norm(c.n);
+    if (c.c.toLowerCase() === nq || c.i3.toLowerCase() === nq) return 0; if (n.startsWith(nq)) return 1; if (n.split(/[\s-]/).some(w => w.startsWith(nq))) return 2;
+    if (norm(c.en).startsWith(nq)) return 3; if (norm(c.cap).startsWith(nq)) return 4; if (n.includes(nq) || norm(c.en).includes(nq)) return 5; if (norm(c.cap).includes(nq)) return 6; return 9; };
+  return SORTED.map(c => [sc(c), c]).filter(x => x[0] < 9).sort((a, b) => a[0] - b[0]).slice(0, 7).map(x => x[1]);
+}
+mqIn.addEventListener('input', () => {
+  const q = norm(mqIn.value.trim()); const r = searchResults(mqIn.value);
+  mres.innerHTML = r.length ? r.map(c => { const s = statusOf(c.c); return `<button class="mres" role="option" data-code="${c.c}"><span class="flag">${c.f}</span><div class="rt"><b>${hl(c.n, q)}</b><span>${hl(c.cap, q)} · ${esc(c.k)}</span></div>${s ? `<em class="st">${STATUS[s].label}</em>` : ''}</button>`; }).join('')
+    : (q ? `<div class="empty" style="padding:22px"><span class="serif">Aucun pays</span>Essayez un autre nom.</div>` : '');
+});
+mqIn.addEventListener('keydown', e => { if (e.key === 'Enter') { const b = mres.querySelector('.mres'); b && b.click(); } if (e.key === 'Escape') closeSearch(); });
+mres.addEventListener('click', e => { const b = e.target.closest('.mres'); if (!b) return; const code = b.dataset.code; closeSearch(); vib(8); map.flyTo(code, {d: 1500}); setTimeout(() => openPeek(code), 700); });
+$('#zsearch').onclick = openSearch; $('#mqx').onclick = () => closeSearch();
+
 /* ---------------- map ---------------- */
 let map;
 const stage = $('#stage');
 const sky1 = $('.stars.s1'), sky2 = $('.stars.s2');
 function initMap() {
   map = new WorldMap(stage, $('#map'), {
-    getStatus: statusOf,
+    getStatus: mapStatus,
     onTap: (code) => onMapTap(code),
     onReady: () => { if (map.mode === 'globe' && !matchMedia('(prefers-reduced-motion: reduce)').matches) map.introSpin(state.home); },
     onRotate: rot => {
@@ -74,6 +135,7 @@ function initMap() {
   map.load().catch(() => toast('Impossible de charger la carte.'));
 }
 function onMapTap(code) {
+  if (replaying) return;
   if (!code) { closePeek(); return; }
   if (state.quick) {
     const s = statusOf(code);
@@ -109,9 +171,10 @@ function go(v, {push = true} = {}) {
   const tabs = $$('.tab'); const i = tabs.findIndex(t => t.dataset.view === v);
   tabs.forEach(t => t.classList.toggle('active', t.dataset.view === v));
   $('#tabInd').style.transform = `translateX(${i * 100}%)`;
-  if (v !== 'map') closePeek(true);
+  if (v !== 'map') { closePeek(true); closeSearch(false); if (replaying) stopReplay(); }
   if (v === 'list') renderList();
   if (v === 'stats') renderStats();
+  if (v === 'journal') renderJournal();
   if (v === 'more') renderMore();
   if (map) { map.visible = v === 'map' && !document.hidden; if (map.visible) map.request(); }
   if (push) history.pushState({v}, '', v === 'map' ? location.pathname : '#' + v);
@@ -119,6 +182,8 @@ function go(v, {push = true} = {}) {
 addEventListener('popstate', e => {
   if (popGuard) { popGuard = false; if (pendingGo) { const v = pendingGo; pendingGo = null; go(v); } return; }
   if (sheetOpen) { closeSheet(false); return; }
+  if (msearch.classList.contains('show')) { closeSearch(false); return; }
+  if (replaying) { stopReplay(); }
   go(e.state?.v || 'map', {push: false});
 });
 
@@ -348,7 +413,13 @@ function detailHTML(code) {
     <div class="fact"><div class="eyebrow">Superficie</div><b>${fmtArea(c.a)} km²</b></div>
     <div class="fact"><div class="eyebrow">${code === h.c ? 'Chez vous' : 'Depuis ' + esc(h.n)}</div><b>${code === h.c ? '0 km' : fmt(d) + ' km'}</b></div>
     <div class="fact"><div class="eyebrow">Part des terres</div><b>${c.a / LAND_TOTAL * 100 < .01 ? '< 0,01' : pctFmt(c.a / LAND_TOTAL * 100, 2)} %</b></div>
+    <div class="fact"><div class="eyebrow">Population</div><b>${c.pop ? fmtPop(c.pop) : '—'}</b></div>
+    <div class="fact"><div class="eyebrow">Habitants</div><b class="wrap">${esc(c.dem || '—')}</b></div>
+    ${c.lg && c.lg.length ? `<div class="fact wide"><div class="eyebrow">Langue${c.lg.length > 1 ? 's' : ''}</div><b class="wrap">${esc(c.lg.join(', '))}</b></div>` : ''}
+    ${c.cur ? `<div class="fact wide"><div class="eyebrow">Monnaie</div><b class="wrap">${esc(c.cur)}</b></div>` : ''}
   </div>
+  ${(() => { const nb = (c.nb || []).filter(k => BY[k]); if (!nb.length) return ''; const nv = nb.filter(k => been(k)).length;
+    return `<div class="blk"><div class="blk-h"><h4>Voisins</h4><span class="muted" style="font-size:12.5px">${nv}/${nb.length} visité${nv > 1 ? 's' : ''}</span></div><div class="nbs">${nb.sort((a, b) => BY[a].n.localeCompare(BY[b].n, 'fr')).map(k => `<button class="nbc ${been(k) ? 'been' : ''}" data-nb="${k}"><span class="flag">${BY[k].f}</span>${esc(BY[k].n)}</button>`).join('')}</div></div>`; })()}
   <div class="blk"><div class="blk-h"><h4>Votre note</h4></div>
     <div class="stars-in" id="stars">${[1, 2, 3, 4, 5].map(i => `<button data-r="${i}" class="${(e.r || 0) >= i ? 'on' : ''}" aria-label="${i} étoile${i > 1 ? 's' : ''}">${icon('star')}</button>`).join('')}</div></div>
   <div class="blk"><div class="blk-h"><h4>Voyages</h4><button class="linkbtn" id="addV">${icon('plus')}Ajouter</button></div>
@@ -360,6 +431,7 @@ function detailHTML(code) {
   <button class="cta ghost" id="seeMap">${icon('globe')}Voir sur la carte</button>`;
 }
 function bindDetail(el, code) {
+  el.querySelectorAll('[data-nb]').forEach(b => b.onclick = () => { vib(5); closeSheet(false); history.replaceState(history.state, ''); setTimeout(() => { openDetail(b.dataset.nb); }, 30); });
   const mini = el.querySelector('#mini'); if (mini) requestAnimationFrame(() => map.renderMini(mini, code, readColors(), statusOf));
   el.querySelector('.status-row').addEventListener('click', ev => {
     const b = ev.target.closest('.sbtn'); if (!b) return; toggleStatus(code, b.dataset.s, b);
@@ -414,7 +486,7 @@ function closeSheet(back = true) {
   sheet.classList.remove('show'); scrim.classList.remove('show');
   sheet.style.transform = '';
   if (back && history.state?.sheet) { popGuard = true; history.back(); }
-  if (view === 'list') renderList(); if (view === 'stats') renderStats(); if (view === 'more') renderMore();
+  if (view === 'list') renderList(); if (view === 'stats') renderStats(); if (view === 'journal') renderJournal(); if (view === 'more') renderMore();
   if (peekCode) openPeek(peekCode);
   flush();
 }
@@ -463,13 +535,14 @@ function renderStats() {
       <div class="metrics">
         <div class="metric"><b>${pctFmt(s.pct)} %</b><span>du monde</span></div>
         <div class="metric"><b>${pctFmt(s.area)} %</b><span>des terres</span></div>
-        <div class="metric"><b>${s.contsVisited}/5</b><span>continents</span></div>
+        <div class="metric"><b>${pctFmt(s.pop)} %</b><span>de l’humanité</span></div>
       </div>
       <div class="metrics" style="margin-top:8px">
-        <div class="metric"><b>${s.l}</b><span>vécu</span></div>
+        <div class="metric"><b>${s.contsVisited}/5</b><span>continents</span></div>
         <div class="metric"><b>${s.w}</b><span>envies</span></div>
         <div class="metric"><b>${nb}/${BADGES.length}</b><span>badges</span></div>
       </div>
+      <p class="src" style="text-align:center;margin-top:10px">Vos pays comptent ${s.popAbs ? fmtPop(s.popAbs) : '0'} d’habitants · population : Banque mondiale</p>
     </div>
     <div class="card next"><div class="medal" style="width:48px;height:48px">${icon('sparkle')}</div><div class="nb"><b>Prochain cap : ${nextM} pays</b><p>${s.been >= 197 ? 'Vous avez tout vu. Respect.' : `Encore ${nextM - s.been} pays`}</p><div class="bar"><i style="width:${(s.been - prevM) / Math.max(1, nextM - prevM) * 100}%"></i></div></div></div>
 
@@ -532,7 +605,7 @@ function renderMore() {
       <button class="item danger" id="reset"><div class="i-ic">${icon('trash')}</div><div class="i-t"><b>Tout effacer</b><span>Remet la carte à zéro</span></div></button>
     </div>
     <input type="file" id="file" accept="application/json,.json" class="sr">
-    <div class="about"><div class="serif">Mappemonde</div>Version 2 · ${COUNTRIES.length} pays · Fonctionne hors connexion<br>Carte : Natural Earth</div>`;
+    <div class="about"><div class="serif">Mappemonde</div>Version 3 · ${COUNTRIES.length} pays · Fonctionne hors connexion<br>Carte : Natural Earth · Population : Banque mondiale</div>`;
   el.querySelectorAll('[data-seg]').forEach(s => {
     placeSeg(s);
     s.addEventListener('click', e => {
@@ -665,6 +738,66 @@ function openPoster() {
   openSheet(html, bind, {name: 'poster'});
 }
 
+/* ---------------- journal ---------------- */
+function renderJournal() {
+  const el = $('#v-journal'); const trips = allTrips();
+  const firstOf = {}; for (const t of trips) if (!firstOf[t.code]) firstOf[t.code] = t.id;
+  const byYear = {}; for (const t of trips) (byYear[t.d.slice(0, 4)] ||= []).push(t);
+  const years = Object.keys(byYear).sort().reverse();
+  const nC = Object.keys(firstOf).length;
+  const undated = COUNTRIES.filter(c => been(c.c) && !(state.countries[c.c].visits || []).length).length;
+  el.innerHTML = `
+    <div class="pg-head"><h2>Journal</h2><p>${trips.length ? `${trips.length} voyage${trips.length > 1 ? 's' : ''} · ${nC} pays datés` : 'Vos voyages, dans l’ordre.'}</p></div>
+    ${trips.length ? `<button class="cta" id="jReplay">${icon('play')}Rejouer mes voyages</button>
+    <div class="tl">${years.map(y => `<div class="tl-year"><h3>${y}</h3><span>${byYear[y].length} voyage${byYear[y].length > 1 ? 's' : ''} · ${new Set(byYear[y].map(t => t.code)).size} pays</span></div>
+      ${byYear[y].slice().reverse().map(t => `<button class="card trip" data-code="${t.code}"><span class="flag">${BY[t.code].f}</span><div class="tt"><b>${esc(BY[t.code].n)}</b><span>${fmtMonth(t.d)}${t.e && t.e !== t.d ? ' → ' + fmtMonth(t.e) : ''}${t.n ? ' · ' + esc(t.n) : ''}</span></div>${firstOf[t.code] === t.id ? '<span class="new">1ʳᵉ fois</span>' : ''}</button>`).join('')}`).join('')}</div>`
+    : `<div class="card empty" style="padding:28px 20px"><span class="serif">Aucun voyage daté</span>Ouvrez un pays, puis « Voyages » → <b>Ajouter</b> pour noter vos séjours. Ils apparaîtront ici, et vous pourrez les rejouer sur le globe.</div>`}
+    ${undated ? `<p class="note" style="text-align:center">${undated} pays visité${undated > 1 ? 's' : ''} sans date. <button class="linkbtn" id="jList" style="display:inline">Compléter</button></p>` : ''}
+    <div style="height:20px"></div>`;
+  el.querySelectorAll('.trip').forEach(b => b.onclick = () => openDetail(b.dataset.code));
+  const r = el.querySelector('#jReplay'); if (r) r.onclick = replay;
+  const l = el.querySelector('#jList'); if (l) l.onclick = () => { fStatus = 'been'; go('list'); };
+}
+let replaying = null;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+async function replay() {
+  const trips = allTrips(); if (!trips.length || replaying) return;
+  const token = replaying = {stop: false};
+  go('map'); closePeek(true); map.select(null);
+  replaySet = new Set(); map.request();
+  app.classList.add('replaying');
+  const rp = $('#replay');
+  rp.innerHTML = `<div class="rp-year" id="rpY">&nbsp;</div><div class="rp-country" id="rpC"></div><div class="rp-meta" id="rpM"></div><div class="rp-bar"><i id="rpB"></i></div><button class="rp-stop" id="rpS">${icon('stop')}Arrêter</button>`;
+  $('#rpS').onclick = stopReplay;
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let lastY = '';
+  await sleep(400);
+  for (let i = 0; i < trips.length; i++) {
+    if (token.stop) return;
+    const t = trips[i], c = BY[t.code]; const y = t.d.slice(0, 4);
+    if (y !== lastY) { const Y = $('#rpY'); Y.textContent = y; Y.classList.remove('flip'); void Y.offsetWidth; Y.classList.add('flip'); lastY = y; }
+    const C = $('#rpC'); C.innerHTML = `<span class="flag">${c.f}</span>${esc(c.n)}`; C.classList.remove('flip'); void C.offsetWidth; C.classList.add('flip');
+    const isNew = !replaySet.has(t.code);
+    replaySet.add(t.code);
+    $('#rpM').textContent = `${fmtMonth(t.d)} · ${replaySet.size} pays`;
+    $('#rpB').style.width = (i + 1) / trips.length * 100 + '%';
+    if (map.mode === 'globe') map.flyTo(t.code, {d: reduce ? 1 : 1300, k: 1.3}); else map.flyTo(t.code, {d: reduce ? 1 : 1100});
+    map.request();
+    await sleep(reduce ? 500 : 650); if (token.stop) return;
+    if (isNew) { map.pulse && map.pulse(t.code); vib(8); }
+    await sleep(reduce ? 600 : 1050);
+  }
+  if (token.stop) return;
+  $('#rpY').textContent = `${replaySet.size} pays`; $('#rpC').innerHTML = `${trips.length} voyage${trips.length > 1 ? 's' : ''} · ${trips[0].d.slice(0, 4)} → ${trips[trips.length - 1].d.slice(0, 4)}`;
+  $('#rpM').textContent = 'Et ce n’est que le début'; $('#rpS').innerHTML = `${icon('check')}Terminer`;
+  if (!reduce) confetti({count: 90});
+  await sleep(4500); if (replaying === token) stopReplay();
+}
+function stopReplay() {
+  if (!replaying) return; replaying.stop = true; replaying = null; replaySet = null;
+  app.classList.remove('replaying'); map.request();
+}
+
 /* ---------------- mode / controls ---------------- */
 function setMode(m, persist = true) {
   map.setMode(m); app.dataset.mode = m;
@@ -695,6 +828,7 @@ applyTheme();
 makeStars();
 initMap();
 renderHeader();
+renderLegend();
 setMode(map.mode, false);
 hint();
 const h0 = location.hash.slice(1);
@@ -709,11 +843,11 @@ function hashImport() {
 addEventListener('hashchange', hashImport);
 if (h0.startsWith('import=')) {
   hashImport();
-} else if (['list', 'stats', 'more'].includes(h0)) { history.replaceState({v: 'map'}, '', location.pathname); go(h0); }
+} else if (['list', 'journal', 'stats', 'more'].includes(h0)) { history.replaceState({v: 'map'}, '', location.pathname); go(h0); }
 else history.replaceState({v: 'map'}, '', location.pathname);
 go(view === 'map' ? 'map' : view, {push: false});
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   addEventListener('load', () => navigator.serviceWorker.register('sw.js', {updateViaCache: 'none'}).catch(() => {}));
 }
-window.__mm = {state, map: () => map, go, openDetail, openImport, openPoster, applyStatus, openPeek, setMode, closeSheet, renderStats, showNextCelebration, queue};
+window.__mm = {renderJournal, replay, openSearch, openColorBy, mapStatus, state, map: () => map, go, openDetail, openImport, openPoster, applyStatus, openPeek, setMode, closeSheet, renderStats, showNextCelebration, queue};

@@ -17,7 +17,7 @@
 <link rel="preload" href="fonts/instrument-serif-latin-400-italic.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="fonts/figtree-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="data/world-lite.json" as="fetch" crossorigin>
-<link rel="stylesheet" href="styles.css?v=1">
+<link rel="stylesheet" href="styles.css?v=3">
 <script>
   (function(){try{var s=JSON.parse(localStorage.getItem('mappemonde.v2')||'{}');var t=s.theme||'auto';if(t==='auto')t=matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';document.documentElement.dataset.theme=t;}catch(e){}})();
 </script>
@@ -49,19 +49,24 @@
         <button role="tab" data-mode="flat">Plan</button>
       </div>
       <div class="ctrls">
+        <button class="ctrl" id="zsearch" aria-label="Rechercher un pays"></button>
         <button class="ctrl" id="zin" aria-label="Zoom avant"></button>
         <button class="ctrl" id="zout" aria-label="Zoom arrière"></button>
         <button class="ctrl" id="zreset" aria-label="Recentrer"></button>
         <button class="ctrl surprise" id="zsurp" aria-label="Surprise : un pays à découvrir"></button>
       </div>
-      <div class="legend" id="legend">
-        <span><i class="dot v"></i>Visité</span><span><i class="dot l"></i>Vécu</span><span><i class="dot w"></i>Envie</span>
+      <button class="legend" id="legend" aria-label="Changer la coloration de la carte"></button>
+      <div class="msearch" id="msearch" role="dialog" aria-label="Recherche">
+        <div class="msearch-bar card"><span class="ms-ic"></span><input id="mq" type="text" placeholder="Pays, capitale, code…" autocomplete="off" enterkeyhint="go" aria-label="Rechercher un pays"><button class="iconbtn" id="mqx" aria-label="Fermer la recherche"></button></div>
+        <div class="msearch-res card" id="mres" role="listbox"></div>
       </div>
+      <div class="replay" id="replay" aria-live="polite"></div>
       <div class="hint" id="hint"></div>
       <div class="peek" id="peek" aria-live="polite"></div>
     </section>
 
     <section class="view page" id="v-list" aria-label="Pays"></section>
+    <section class="view page" id="v-journal" aria-label="Journal"></section>
     <section class="view page" id="v-stats" aria-label="Statistiques"></section>
     <section class="view page" id="v-more" aria-label="Réglages"></section>
   </main>
@@ -70,6 +75,7 @@
     <i class="tab-ind" id="tabInd"></i>
     <button data-view="map" class="tab"><span class="ti" data-icon="globe"></span><span>Carte</span></button>
     <button data-view="list" class="tab"><span class="ti" data-icon="list"></span><span>Pays</span></button>
+    <button data-view="journal" class="tab"><span class="ti" data-icon="book"></span><span>Journal</span></button>
     <button data-view="stats" class="tab"><span class="ti" data-icon="chart"></span><span>Stats</span></button>
     <button data-view="more" class="tab"><span class="ti" data-icon="sliders"></span><span>Réglages</span></button>
   </nav>
@@ -83,6 +89,6 @@
   <div class="toast" id="toast" role="status"></div>
   <canvas id="confetti" aria-hidden="true"></canvas>
 </div>
-<script type="module" src="js/app.js?v=1"></script>
+<script type="module" src="js/app.js?v=3"></script>
 </body>
 </html>

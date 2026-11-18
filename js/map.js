@@ -9,6 +9,9 @@ const META = Object.fromEntries(COUNTRIES.map(c => [c.c, c]));
 // micro-states (hard to tap) or absent from the map: draw a marker
 const MICRO = COUNTRIES.filter(c => c.a < 2700 || c.c === 'TV').map(c => c.c);
 
+const ORDER = ['other', 'land', 'w', 'h1', 'h2', 'h3', 'h4', 'h5', 'v', 'l'];
+function colorOf(key, C) { return key === 'v' ? C.visited : key === 'l' ? C.lived : key === 'w' ? C.wishFill : key === 'other' ? C.land2 : key[0] === 'h' ? C[key] : C.land; }
+function dotOf(key, C) { return key === 'v' ? C.visited : key === 'l' ? C.lived : key === 'w' ? C.wish : key && key[0] === 'h' ? C[key] : C.marker; }
 function spanDeg(code) { const m = META[code]; return m ? Math.sqrt(m.a) / 111 : 10; }
 
 
@@ -216,13 +219,13 @@ export class WorldMap {
     ctx.beginPath(); lines(this.gratFast); ctx.strokeStyle = C.grat; ctx.lineWidth = .6; ctx.stroke();
     const fast = data.fast;
     const st = this.opts.getStatus;
-    const groups = {other: [], land: [], w: [], v: [], l: []};
+    const groups = {}; for (const k of ORDER) groups[k] = [];
     for (const F of fast.feats) {
       const c = F.c; const dc = c.x * V[0] + c.y * V[1] + c.z * V[2];
       if (!c.big && dc < -c.sinR) continue; // hidden
       if (zoomedIn && !c.big) { const X0 = cx + r * (c.x * E[0] + c.y * E[1] + c.z * E[2]), Y0 = cy - r * (c.x * N[0] + c.y * N[1] + c.z * N[2]), rr = r * c.sinR + 4; if (X0 + rr < 0 || X0 - rr > W || Y0 + rr < 0 || Y0 - rr > H) continue; }
       const key = F.code[0] === '-' ? 'other' : (st(F.code) || 'land');
-      groups[key].push(F);
+      (groups[key] || groups.land).push(F);
       F.vis = !c.big && dc > c.sinR + 0.01; // fully in front
     }
     const drawFeat = F => {
@@ -243,11 +246,7 @@ export class WorldMap {
     };
     this._drawFeat = drawFeat;
     const fillGroup = (list, color) => { if (!list.length) return; ctx.beginPath(); for (const F of list) drawFeat(F); ctx.fillStyle = color; ctx.fill(); };
-    fillGroup(groups.other, C.land2);
-    fillGroup(groups.land, C.land);
-    fillGroup(groups.w, C.wishFill);
-    fillGroup(groups.v, C.visited);
-    fillGroup(groups.l, C.lived);
+    for (const k of ORDER) fillGroup(groups[k], colorOf(k, C));
     ctx.beginPath(); lines(fast.borders); ctx.strokeStyle = C.border; ctx.lineWidth = .7; ctx.stroke();
     ctx.beginPath(); lines(fast.coast); ctx.strokeStyle = C.coast; ctx.lineWidth = .6; ctx.stroke();
     if (groups.w.length) { ctx.beginPath(); for (const F of groups.w) drawFeat(F); ctx.strokeStyle = C.wish; ctx.lineWidth = 1; ctx.stroke(); }
@@ -293,7 +292,7 @@ export class WorldMap {
     const zoomed = this.mode === 'globe' ? this.k > 2.2 : this.fk > 2.6;
     if (!s && !zoomed && code !== this.selected) { this._markers.push({code, x: xy[0], y: xy[1], hidden: true}); return; }
     const rad = s ? 3.4 : 2.4;
-    const col = s === 'v' ? C.visited : s === 'l' ? C.lived : s === 'w' ? C.wish : C.marker;
+    const col = dotOf(s, C);
     ctx.beginPath(); ctx.arc(xy[0], xy[1], rad + 2.2, 0, TAU); ctx.fillStyle = C.markerHalo; ctx.fill();
     ctx.beginPath(); ctx.arc(xy[0], xy[1], rad, 0, TAU); ctx.fillStyle = col; ctx.fill();
     if (code === this.selected) { ctx.beginPath(); ctx.arc(xy[0], xy[1], rad + 5, 0, TAU); ctx.strokeStyle = C.sel; ctx.lineWidth = 1.5; ctx.stroke(); }
@@ -321,14 +320,10 @@ export class WorldMap {
     g.addColorStop(0, C.ocean1); g.addColorStop(1, C.ocean2);
     ctx.fillStyle = g; ctx.fill(F.sphere);
     ctx.strokeStyle = C.grat; ctx.lineWidth = .6 * px; ctx.stroke(F.grat);
-    const groups = {land: new Path2D(), v: new Path2D(), l: new Path2D(), w: new Path2D(), other: new Path2D()};
+    const groups = {}; for (const k of ORDER) groups[k] = new Path2D();
     const st = this.opts.getStatus;
-    for (const f of F.feats) { const key = f.code[0] === '-' ? 'other' : (st(f.code) || 'land'); groups[key].addPath(f.p); }
-    ctx.fillStyle = C.land2; ctx.fill(groups.other);
-    ctx.fillStyle = C.land; ctx.fill(groups.land);
-    ctx.fillStyle = C.wishFill; ctx.fill(groups.w);
-    ctx.fillStyle = C.visited; ctx.fill(groups.v);
-    ctx.fillStyle = C.lived; ctx.fill(groups.l);
+    for (const f of F.feats) { const key = f.code[0] === '-' ? 'other' : (st(f.code) || 'land'); (groups[key] || groups.land).addPath(f.p); }
+    for (const k of ORDER) { ctx.fillStyle = colorOf(k, C); ctx.fill(groups[k]); }
     ctx.strokeStyle = C.border; ctx.lineWidth = .7 * px; ctx.stroke(F.borders);
     ctx.strokeStyle = C.coast; ctx.lineWidth = .6 * px; ctx.stroke(F.coast);
     ctx.strokeStyle = C.wish; ctx.lineWidth = 1 * px; ctx.stroke(groups.w);
