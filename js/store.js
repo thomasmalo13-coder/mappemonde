@@ -15,13 +15,13 @@ export const STATUS = {
 const KEY = 'mappemonde.v2';
 const LEGACY = 'mappemonde.visited.v1';
 
-const defaults = () => ({v: 2, schema: 3, countries: {}, home: 'FR', theme: 'auto', view: 'globe', quick: false, badges: [], seen: {}, poster: 'nuit', colorBy: 'status', wishOrder: [], quiz: {}});
+const defaults = () => ({v: 2, schema: 4, countries: {}, home: 'FR', theme: 'auto', view: 'globe', quick: false, badges: [], seen: {}, poster: 'nuit', colorBy: 'status', wishOrder: [], quiz: {}});
 
 function load() {
   let s = null, raw = null;
   try { raw = localStorage.getItem(KEY); s = JSON.parse(raw || 'null'); } catch {}
   // safety copy of the previous schema before the first v3 save (never overwritten)
-  try { if (raw && s && (s.schema || 2) < 3 && !localStorage.getItem(KEY + '.backup-schema2')) localStorage.setItem(KEY + '.backup-schema2', raw); } catch {}
+  try { const sv = s && (s.schema || 2); if (raw && sv < 4 && !localStorage.getItem(KEY + '.backup-schema' + sv)) localStorage.setItem(KEY + '.backup-schema' + sv, raw); } catch {}
   if (!s || typeof s !== 'object') s = defaults();
   s = Object.assign(defaults(), s);
   if (!s.countries || typeof s.countries !== 'object') s.countries = {};
@@ -36,7 +36,7 @@ function load() {
   if (!s.quiz || typeof s.quiz !== 'object') s.quiz = {};
   if (!['status', 'trips', 'rating'].includes(s.colorBy)) s.colorBy = 'status';
   for (const e of Object.values(s.countries)) { if (e.visits && !Array.isArray(e.visits)) e.visits = []; if (e.plan && !/^\d{4}-\d{2}-\d{2}$/.test(e.plan)) delete e.plan; }
-  s.schema = 3;
+  s.schema = 4;
   return s;
 }
 
@@ -124,6 +124,6 @@ export function wishList() {
   return order;
 }
 export function nextPlan() {
-  const today = new Date().toISOString().slice(0, 10);
+  const n = new Date(); const today = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
   return Object.entries(state.countries).filter(([k, e]) => e.plan && e.plan >= today).map(([code, e]) => ({code, plan: e.plan})).sort((a, b) => a.plan.localeCompare(b.plan))[0] || null;
 }

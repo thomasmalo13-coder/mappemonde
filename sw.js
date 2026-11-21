@@ -1,6 +1,6 @@
-const CACHE = 'mappemonde-v3-1';
-const ASSETS = ['./', 'index.html', 'styles.css?v=3', 'manifest.webmanifest',
-  'js/app.js?v=3', 'js/store.js', 'js/map.js', 'js/vendor.js', 'js/countries.js', 'js/icons.js', 'js/confetti.js', 'js/parse.js', 'js/badges.js', 'js/poster.js',
+const CACHE = 'mappemonde-v4-1';
+const ASSETS = ['./', 'index.html', 'styles.css?v=4', 'manifest.webmanifest',
+  'js/app.js?v=4', 'js/store.js', 'js/map.js', 'js/vendor.js', 'js/countries.js', 'js/icons.js', 'js/confetti.js', 'js/parse.js', 'js/badges.js', 'js/poster.js',
   'data/world-lite.json', 'data/world-50m.json',
   'fonts/instrument-serif-latin-400-italic.woff2', 'fonts/instrument-serif-latin-ext-400-italic.woff2', 'fonts/instrument-serif-latin-400-normal.woff2',
   'fonts/figtree-latin-wght-normal.woff2', 'fonts/figtree-latin-ext-wght-normal.woff2',

@@ -1,5 +1,5 @@
 import {COUNTRIES} from './countries.js';
-import {state, save, flush, subscribe, statusOf, been, setStatus, entry, cleanup, stats, BY, TOTAL, CONTINENTS, CONT_TOTAL, distanceKm, LAND_TOTAL, exportJSON, replaceState, resetAll, STATUS, allTrips} from './store.js';
+import {state, save, flush, subscribe, statusOf, been, setStatus, entry, cleanup, stats, BY, TOTAL, CONTINENTS, CONT_TOTAL, distanceKm, LAND_TOTAL, exportJSON, replaceState, resetAll, STATUS, allTrips, wishList, nextPlan} from './store.js';
 import {WorldMap} from './map.js';
 import {icon} from './icons.js';
 import {confetti} from './confetti.js';
@@ -12,12 +12,19 @@ const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const app = $('#app');
 const fmt = n => n.toLocaleString('fr-FR');
 const fmtPop = n => n >= 1e9 ? (n / 1e9).toLocaleString('fr-FR', {maximumFractionDigits: 2}) + ' Md' : n >= 1e6 ? (n / 1e6).toLocaleString('fr-FR', {maximumFractionDigits: n >= 1e8 ? 0 : 1}) + ' M' : fmt(Math.round(n / 100) * 100);
+const todayISO = () => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`; };
+const daysTo = d => Math.round((new Date(d + 'T12:00:00') - new Date(todayISO() + 'T12:00:00')) / 864e5);
+const fmtDay = d => new Date(d + 'T12:00:00').toLocaleDateString('fr-FR', {weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'});
 const fmtArea = n => n < 10 ? n.toLocaleString('fr-FR', {maximumFractionDigits: 2}) : fmt(Math.round(n));
 const pctFmt = (v, d = 0) => (v > 0 && v < 1 && d === 0 ? v.toFixed(1) : v.toFixed(d)).replace('.', ',');
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 const SORTED = [...COUNTRIES].sort((a, b) => a.n.localeCompare(b.n, 'fr'));
 const ABBR = {Afrique: 'Afr', Amériques: 'Amé', Asie: 'Asie', Europe: 'Eur', Océanie: 'Océ'};
 const vib = ms => { try { navigator.vibrate && navigator.vibrate(ms); } catch {} };
+const emptyArt = () => `<svg class="empty-art" viewBox="0 0 120 96" aria-hidden="true"><defs><radialGradient id="ea" cx=".38" cy=".35" r=".75"><stop offset="0" stop-color="var(--surface3)"/><stop offset="1" stop-color="transparent"/></radialGradient></defs>
+  <circle cx="60" cy="50" r="30" fill="url(#ea)" stroke="var(--line2)"/><ellipse cx="60" cy="50" rx="12" ry="30" fill="none" stroke="var(--line2)"/><path d="M30 50h60M34 36h52M34 64h52" stroke="var(--line)" fill="none"/>
+  <path class="orbit" d="M14 62c10-30 82-40 94-14" fill="none" stroke="var(--gold)" stroke-width="1.2" stroke-dasharray="2 4" stroke-linecap="round"/>
+  <g class="plane" transform="translate(104 42) rotate(28)"><path d="M0-5 2 0 0 5-1 0z M-4-1h8v2h-8z" fill="var(--gold)"/></g></svg>`;
 const home = () => BY[state.home] || BY.FR;
 
 /* ---------------- theme ---------------- */
@@ -34,7 +41,7 @@ function readColors() {
   return {land: g('--m-land'), land2: g('--m-land2'), ocean1: g('--m-ocean1'), ocean2: g('--m-ocean2'), border: g('--m-border'), coast: g('--m-coast'),
     grat: g('--m-grat'), glow1: g('--m-glow1'), glow2: g('--m-glow2'), light: g('--m-light'), shade: g('--m-shade'), rim: g('--m-rim'), sel: g('--m-sel'),
     glowMid: g('--m-glowmid'), selGlow: g('--m-selglow'), flash: g('--m-flash'), marker: g('--m-marker'), markerHalo: g('--m-halo'), wishFill: g('--m-wishfill'),
-    visited: g('--v'), lived: g('--l'), wish: g('--w'), bg: g('--bg'), h1: g('--h1'), h2: g('--h2'), h3: g('--h3'), h4: g('--h4'), h5: g('--h5')};
+    visited: g('--v'), lived: g('--l'), wish: g('--w'), bg: g('--bg'), h1: g('--h1'), h2: g('--h2'), h3: g('--h3'), h4: g('--h4'), h5: g('--h5'), grain: g('--m-grain'), night: g('--m-night'), haze: g('--m-haze'), rimlight: g('--m-rimlight'), vedge: g('--m-vedge')};
 }
 function makeStars() {
   const mk = (n, maxA, size) => {
@@ -167,6 +174,7 @@ function go(v, {push = true} = {}) {
   if (popGuard && push) { pendingGo = v; return; }
   if (v === view && push) { const p = $('#v-' + v); if (p && p.scrollTop > 0) p.scrollTo({top: 0, behavior: 'smooth'}); return; }
   view = v; app.dataset.view = v;
+  const pg = $('#v-' + v); if (pg && v !== 'map') { pg.classList.remove('enter'); void pg.offsetWidth; pg.classList.add('enter'); clearTimeout(pg._et); pg._et = setTimeout(() => pg.classList.remove('enter'), 1100); }
   $$('.view').forEach(el => el.classList.toggle('active', el.id === 'v-' + v));
   const tabs = $$('.tab'); const i = tabs.findIndex(t => t.dataset.view === v);
   tabs.forEach(t => t.classList.toggle('active', t.dataset.view === v));
@@ -327,7 +335,7 @@ function renderList() {
   if (!el.dataset.ready) {
     el.dataset.ready = 1;
     el.innerHTML = `
-      <div class="pg-head"><h2>Pays</h2><p id="listSub"></p></div>
+      <div class="pg-head"><div class="kicker">N° 01 — Atlas</div><h2>Pays</h2><p id="listSub"></p></div>
       <div class="search"><label>${icon('search')}<input id="q" type="search" placeholder="Rechercher un pays, une capitale…" autocomplete="off" enterkeyhint="search"><button class="clear" id="qx" aria-label="Effacer" hidden>${icon('x')}</button></label></div>
       <div class="chips" id="fs"></div>
       <div class="chips" id="fc"></div>
@@ -373,7 +381,7 @@ function renderRows() {
     return true;
   });
   const el = $('#rows');
-  if (!list.length) { el.innerHTML = `<div class="empty"><span class="serif">Aucun pays</span>Essayez une autre recherche ou un autre filtre.</div>`; return; }
+  if (!list.length) { el.innerHTML = `<div class="empty">${emptyArt()}<span class="serif">Aucun pays</span>Essayez une autre recherche ou un autre filtre.</div>`; return; }
   let html = '', L = '';
   for (const c of list) {
     const l = norm(c.n)[0].toUpperCase();
@@ -420,6 +428,10 @@ function detailHTML(code) {
   </div>
   ${(() => { const nb = (c.nb || []).filter(k => BY[k]); if (!nb.length) return ''; const nv = nb.filter(k => been(k)).length;
     return `<div class="blk"><div class="blk-h"><h4>Voisins</h4><span class="muted" style="font-size:12.5px">${nv}/${nb.length} visité${nv > 1 ? 's' : ''}</span></div><div class="nbs">${nb.sort((a, b) => BY[a].n.localeCompare(BY[b].n, 'fr')).map(k => `<button class="nbc ${been(k) ? 'been' : ''}" data-nb="${k}"><span class="flag">${BY[k].f}</span>${esc(BY[k].n)}</button>`).join('')}</div></div>`; })()}
+  ${(() => { const d = e.plan ? daysTo(e.plan) : null;
+    return `<div class="blk"><div class="blk-h"><h4>Prochain départ</h4>${e.plan ? `<button class="linkbtn" id="planX">${icon('x')}Retirer</button>` : ''}</div>
+    <div class="planbox">${icon('calendar')}<input type="date" id="planD" min="${todayISO()}" value="${esc(e.plan || '')}" aria-label="Date du prochain voyage">${d !== null ? `<span class="cd">${d === 0 ? 'Jour J' : 'J-' + d}</span>` : ''}</div>
+    ${e.plan ? '' : '<p class="src">Choisissez une date : le compte à rebours apparaîtra dans le Journal.</p>'}</div>`; })()}
   <div class="blk"><div class="blk-h"><h4>Votre note</h4></div>
     <div class="stars-in" id="stars">${[1, 2, 3, 4, 5].map(i => `<button data-r="${i}" class="${(e.r || 0) >= i ? 'on' : ''}" aria-label="${i} étoile${i > 1 ? 's' : ''}">${icon('star')}</button>`).join('')}</div></div>
   <div class="blk"><div class="blk-h"><h4>Voyages</h4><button class="linkbtn" id="addV">${icon('plus')}Ajouter</button></div>
@@ -431,6 +443,13 @@ function detailHTML(code) {
   <button class="cta ghost" id="seeMap">${icon('globe')}Voir sur la carte</button>`;
 }
 function bindDetail(el, code) {
+  const pd = el.querySelector('#planD'); if (pd) pd.addEventListener('change', () => {
+    const v = pd.value; const e = entry(code);
+    if (v && v >= todayISO()) { e.plan = v; if (!statusOf(code)) applyStatus(code, 'w', {silent: true}); else save(); toast(daysTo(v) === 0 ? 'C’est aujourd’hui, bon voyage !' : `Départ dans ${daysTo(v)} jour${daysTo(v) > 1 ? 's' : ''}`); }
+    else { delete e.plan; cleanup(code); save(); }
+    rerenderSheet();
+  });
+  const px = el.querySelector('#planX'); if (px) px.onclick = () => { const e = entry(code); delete e.plan; cleanup(code); save(); rerenderSheet(); };
   el.querySelectorAll('[data-nb]').forEach(b => b.onclick = () => { vib(5); closeSheet(false); history.replaceState(history.state, ''); setTimeout(() => { openDetail(b.dataset.nb); }, 30); });
   const mini = el.querySelector('#mini'); if (mini) requestAnimationFrame(() => map.renderMini(mini, code, readColors(), statusOf));
   el.querySelector('.status-row').addEventListener('click', ev => {
@@ -507,6 +526,7 @@ scrim.addEventListener('click', () => closeSheet());
 /* ---------------- stats ---------------- */
 function renderStats() {
   const s = stats(); const el = $('#v-stats');
+  setTimeout(() => el.querySelectorAll('.pod').forEach(b => b.onclick = () => openDetail(b.dataset.code)));
   const R = 92, C = 2 * Math.PI * R;
   const beenList = COUNTRIES.filter(c => been(c.c));
   const h = home();
@@ -526,7 +546,7 @@ function renderStats() {
   const badges = evaluate(); const nb = badges.filter(b => b.done).length;
   const nextBadge = badges.filter(b => !b.done).sort((a, b) => (b.v / b.goal) - (a.v / a.goal))[0];
   el.innerHTML = `
-    <div class="pg-head"><h2>Statistiques</h2><p>Votre monde, en chiffres.</p></div>
+    <div class="pg-head"><div class="kicker">N° 03 — En chiffres</div><h2>Statistiques</h2><p>Votre monde, en chiffres.</p></div>
     <div class="card hero">
       <div class="ring"><svg viewBox="0 0 210 210"><defs><linearGradient id="rg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="var(--v)"/><stop offset="1" stop-color="var(--gold)"/></linearGradient></defs>
         <circle class="trk" cx="105" cy="105" r="${R}" fill="none" stroke-width="10"/>
@@ -546,6 +566,8 @@ function renderStats() {
     </div>
     <div class="card next"><div class="medal" style="width:48px;height:48px">${icon('sparkle')}</div><div class="nb"><b>Prochain cap : ${nextM} pays</b><p>${s.been >= 197 ? 'Vous avez tout vu. Respect.' : `Encore ${nextM - s.been} pays`}</p><div class="bar"><i style="width:${(s.been - prevM) / Math.max(1, nextM - prevM) * 100}%"></i></div></div></div>
 
+    ${(() => { const w = wishList().slice(0, 3); if (!w.length) return ''; return `<div class="section-title"><h3>Top envies</h3><span>${s.w} au total</span></div>
+      <div class="podium">${w.map((k, i) => `<button class="card pod" data-code="${k}"><span class="pr">${i + 1}</span><span class="flag">${BY[k].f}</span><b>${esc(BY[k].n)}</b>${state.countries[k]?.plan ? `<em>J-${daysTo(state.countries[k].plan)}</em>` : ''}</button>`).join('')}</div>`; })()}
     <div class="section-title"><h3>Par continent</h3><span>${s.contsDone} bouclé${s.contsDone > 1 ? 's' : ''}</span></div>
     <div class="card conts">${CONTINENTS.map(k => `<button class="cont" data-k="${k}"><h4>${k}</h4><span class="frac"><b>${s.cont[k]}</b> / ${CONT_TOTAL[k]} · ${Math.round(s.cont[k] / CONT_TOTAL[k] * 100)} %</span><div class="bar"><i class="${s.cont[k] === CONT_TOTAL[k] ? 'done' : ''}" style="width:0" data-w="${s.cont[k] / CONT_TOTAL[k] * 100}"></i></div></button>`).join('')}</div>
 
@@ -582,7 +604,7 @@ function renderMore() {
   const opts = SORTED.map(c => `<option value="${c.c}" ${c.c === state.home ? 'selected' : ''}>${c.n}</option>`).join('');
   const seg = (name, val, items) => `<div class="seg small" data-seg="${name}"><i class="seg-ind"></i>${items.map(([k, l]) => `<button data-v="${k}" aria-selected="${val === k}">${l}</button>`).join('')}</div>`;
   el.innerHTML = `
-    <div class="pg-head"><h2>Réglages</h2><p>Votre carte reste sur ce téléphone, même sans réseau.</p></div>
+    <div class="pg-head"><div class="kicker">N° 04 — Préférences</div><h2>Réglages</h2><p>Votre carte reste sur ce téléphone, même sans réseau.</p></div>
     <div class="eyebrow group-title">Apparence</div>
     <div class="card group">
       <div class="item"><div class="i-ic">${icon(document.documentElement.dataset.theme === 'light' ? 'sun' : 'moon')}</div><div class="i-t"><b>Thème</b></div>${seg('theme', state.theme, [['auto', 'Auto'], ['dark', 'Sombre'], ['light', 'Clair']])}</div>
@@ -605,7 +627,7 @@ function renderMore() {
       <button class="item danger" id="reset"><div class="i-ic">${icon('trash')}</div><div class="i-t"><b>Tout effacer</b><span>Remet la carte à zéro</span></div></button>
     </div>
     <input type="file" id="file" accept="application/json,.json" class="sr">
-    <div class="about"><div class="serif">Mappemonde</div>Version 3 · ${COUNTRIES.length} pays · Fonctionne hors connexion<br>Carte : Natural Earth · Population : Banque mondiale</div>`;
+    <div class="about"><div class="serif">Mappemonde</div>Version 4 · ${COUNTRIES.length} pays · Fonctionne hors connexion<br>Carte : Natural Earth · Population : Banque mondiale</div>`;
   el.querySelectorAll('[data-seg]').forEach(s => {
     placeSeg(s);
     s.addEventListener('click', e => {
@@ -747,16 +769,53 @@ function renderJournal() {
   const nC = Object.keys(firstOf).length;
   const undated = COUNTRIES.filter(c => been(c.c) && !(state.countries[c.c].visits || []).length).length;
   el.innerHTML = `
-    <div class="pg-head"><h2>Journal</h2><p>${trips.length ? `${trips.length} voyage${trips.length > 1 ? 's' : ''} · ${nC} pays datés` : 'Vos voyages, dans l’ordre.'}</p></div>
+    <div class="pg-head"><div class="kicker">N° 02 — Carnet de route</div><h2>Journal</h2><p>${trips.length ? `${trips.length} voyage${trips.length > 1 ? 's' : ''} · ${nC} pays datés` : 'Vos voyages, dans l’ordre.'}</p></div>
+    ${planCard()}
     ${trips.length ? `<button class="cta" id="jReplay">${icon('play')}Rejouer mes voyages</button>
     <div class="tl">${years.map(y => `<div class="tl-year"><h3>${y}</h3><span>${byYear[y].length} voyage${byYear[y].length > 1 ? 's' : ''} · ${new Set(byYear[y].map(t => t.code)).size} pays</span></div>
       ${byYear[y].slice().reverse().map(t => `<button class="card trip" data-code="${t.code}"><span class="flag">${BY[t.code].f}</span><div class="tt"><b>${esc(BY[t.code].n)}</b><span>${fmtMonth(t.d)}${t.e && t.e !== t.d ? ' → ' + fmtMonth(t.e) : ''}${t.n ? ' · ' + esc(t.n) : ''}</span></div>${firstOf[t.code] === t.id ? '<span class="new">1ʳᵉ fois</span>' : ''}</button>`).join('')}`).join('')}</div>`
-    : `<div class="card empty" style="padding:28px 20px"><span class="serif">Aucun voyage daté</span>Ouvrez un pays, puis « Voyages » → <b>Ajouter</b> pour noter vos séjours. Ils apparaîtront ici, et vous pourrez les rejouer sur le globe.</div>`}
+    : `<div class="card empty" style="padding:28px 20px">${emptyArt()}<span class="serif">Aucun voyage daté</span>Ouvrez un pays, puis « Voyages » → <b>Ajouter</b> pour noter vos séjours. Ils apparaîtront ici, et vous pourrez les rejouer sur le globe.</div>`}
     ${undated ? `<p class="note" style="text-align:center">${undated} pays visité${undated > 1 ? 's' : ''} sans date. <button class="linkbtn" id="jList" style="display:inline">Compléter</button></p>` : ''}
+    ${wishHTML()}
     <div style="height:20px"></div>`;
+  bindWish(el);
+  const pc = el.querySelector('#planCard'); if (pc) pc.onclick = () => openDetail(pc.dataset.code);
   el.querySelectorAll('.trip').forEach(b => b.onclick = () => openDetail(b.dataset.code));
   const r = el.querySelector('#jReplay'); if (r) r.onclick = replay;
+  const ph = el.querySelector('#planHint'); if (ph) ph.onclick = () => go('list');
   const l = el.querySelector('#jList'); if (l) l.onclick = () => { fStatus = 'been'; go('list'); };
+}
+function planCard() {
+  const np = nextPlan();
+  if (!np) return `<button class="card plan empty-plan" id="planHint"><span class="flag">${icon('calendar')}</span><div class="pt"><b>Prochain départ</b><span>Ouvrez un pays et choisissez une date pour lancer le compte à rebours.</span></div></button>`;
+  const c = BY[np.code], d = daysTo(np.plan);
+  return `<button class="card plan" id="planCard" data-code="${np.code}"><span class="flag">${c.f}</span><div class="pt"><div class="eyebrow">Prochain départ</div><b>${esc(c.n)}</b><span>${fmtDay(np.plan)}</span></div><div class="jx"><b>${d === 0 ? 'J' : d}</b><span>${d === 0 ? 'Aujourd’hui' : d > 1 ? 'jours' : 'jour'}</span></div></button>`;
+}
+function wishHTML() {
+  const w = wishList(); if (!w.length) return '';
+  return `<div class="section-title"><h3>Mes envies</h3><span>Classez-les par priorité</span></div>
+  <div class="card wishes" id="wishes">${w.map((k, i) => `<div class="wish" data-code="${k}"><span class="grip" aria-hidden="true">${icon('grip')}</span><span class="rk">${i + 1}</span><span class="flag">${BY[k].f}</span><button class="wt" data-open="${k}"><b>${esc(BY[k].n)}</b><span>${state.countries[k]?.plan ? 'Départ ' + (daysTo(state.countries[k].plan) === 0 ? 'aujourd’hui' : 'dans ' + daysTo(state.countries[k].plan) + ' j') : esc(BY[k].k)}</span></button>
+    <button class="mv" data-mv="-1" aria-label="Monter ${esc(BY[k].n)}" ${i === 0 ? 'disabled' : ''}>${icon('up')}</button><button class="mv" data-mv="1" aria-label="Descendre ${esc(BY[k].n)}" ${i === w.length - 1 ? 'disabled' : ''}>${icon('down')}</button></div>`).join('')}</div>`;
+}
+function moveWish(code, to) {
+  const w = wishList(); const i = w.indexOf(code); if (i < 0) return; to = Math.max(0, Math.min(w.length - 1, to)); if (to === i) return;
+  w.splice(i, 1); w.splice(to, 0, code); state.wishOrder = w; save(); vib(6);
+  const box = $('#wishes'); if (!box) return; box.outerHTML = wishHTML().replace(/^[\s\S]*?(<div class="card wishes")/, '$1'); bindWish($('#v-journal'));
+  const row = $(`#wishes .wish[data-code="${code}"]`); row && row.classList.add('moved');
+}
+function bindWish(el) {
+  const box = el.querySelector('#wishes'); if (!box) return;
+  box.querySelectorAll('[data-open]').forEach(b => b.onclick = () => openDetail(b.dataset.open));
+  box.querySelectorAll('[data-mv]').forEach(b => b.onclick = () => { const code = b.closest('.wish').dataset.code; moveWish(code, wishList().indexOf(code) + +b.dataset.mv); });
+  // drag to reorder via the grip
+  box.querySelectorAll('.grip').forEach(g => g.addEventListener('pointerdown', ev => {
+    const row = g.closest('.wish'); const rows = [...box.querySelectorAll('.wish')]; const i0 = rows.indexOf(row); const h = row.offsetHeight; const y0 = ev.clientY; let to = i0;
+    g.setPointerCapture(ev.pointerId); row.classList.add('dragging'); ev.preventDefault();
+    const mv = e => { const dy = e.clientY - y0; row.style.transform = `translateY(${dy}px)`; to = Math.max(0, Math.min(rows.length - 1, i0 + Math.round(dy / h)));
+      rows.forEach((r, j) => { if (r === row) return; const sh = (j > i0 && j <= to) ? -h : (j < i0 && j >= to) ? h : 0; r.style.transform = sh ? `translateY(${sh}px)` : ''; }); };
+    const up = () => { g.removeEventListener('pointermove', mv); g.removeEventListener('pointerup', up); g.removeEventListener('pointercancel', up); rows.forEach(r => r.style.transform = ''); row.classList.remove('dragging'); if (to !== i0) moveWish(row.dataset.code, to); };
+    g.addEventListener('pointermove', mv); g.addEventListener('pointerup', up); g.addEventListener('pointercancel', up);
+  }));
 }
 let replaying = null;
 const sleep = ms => new Promise(r => setTimeout(r, ms));

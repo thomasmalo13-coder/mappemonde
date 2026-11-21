@@ -9,6 +9,13 @@ const META = Object.fromEntries(COUNTRIES.map(c => [c.c, c]));
 // micro-states (hard to tap) or absent from the map: draw a marker
 const MICRO = COUNTRIES.filter(c => c.a < 2700 || c.c === 'TV').map(c => c.c);
 
+function makeGrain(ctx) {
+  try {
+    const c = document.createElement('canvas'); c.width = c.height = 180; const x = c.getContext('2d'); const d = x.createImageData(180, 180);
+    for (let i = 0; i < d.data.length; i += 4) { const v = Math.random() * 255 | 0; d.data[i] = d.data[i + 1] = d.data[i + 2] = v; d.data[i + 3] = 40 + Math.random() * 60 | 0; }
+    x.putImageData(d, 0, 0); return ctx.createPattern(c, 'repeat');
+  } catch { return null; }
+}
 const ORDER = ['other', 'land', 'w', 'h1', 'h2', 'h3', 'h4', 'h5', 'v', 'l'];
 function colorOf(key, C) { return key === 'v' ? C.visited : key === 'l' ? C.lived : key === 'w' ? C.wishFill : key === 'other' ? C.land2 : key[0] === 'h' ? C[key] : C.land; }
 function dotOf(key, C) { return key === 'v' ? C.visited : key === 'l' ? C.lived : key === 'w' ? C.wish : key && key[0] === 'h' ? C[key] : C.marker; }
@@ -194,6 +201,9 @@ export class WorldMap {
     if (this.k > 2.2) ctx.fillStyle = C.ocean1;
     else { g = ctx.createRadialGradient(cx - r * .4, cy - r * .45, r * .05, cx, cy, r * 1.02); g.addColorStop(0, C.ocean1); g.addColorStop(1, C.ocean2); ctx.fillStyle = g; }
     if (covers) ctx.fillRect(0, 0, this.w, this.h); else { ctx.beginPath(); ctx.arc(cx, cy, r, 0, TAU); ctx.fill(); }
+    // paper-like grain on the sea (screen-space, very subtle)
+    if (!this._grain) this._grain = makeGrain(ctx);
+    if (this._grain && C.grain) { ctx.save(); ctx.globalAlpha = +C.grain || 0; ctx.fillStyle = this._grain; if (covers) ctx.fillRect(0, 0, this.w, this.h); else { ctx.beginPath(); ctx.arc(cx, cy, r, 0, TAU); ctx.fill(); } ctx.restore(); }
     // view basis
     const TOL = this.moving ? 1.1 : 0.6;
     const zoomedIn = this.k > 1.6, W = this.w, H = this.h;
@@ -249,6 +259,7 @@ export class WorldMap {
     for (const k of ORDER) fillGroup(groups[k], colorOf(k, C));
     ctx.beginPath(); lines(fast.borders); ctx.strokeStyle = C.border; ctx.lineWidth = .7; ctx.stroke();
     ctx.beginPath(); lines(fast.coast); ctx.strokeStyle = C.coast; ctx.lineWidth = .6; ctx.stroke();
+    if (C.vedge && (groups.v.length || groups.l.length)) { ctx.beginPath(); for (const F of groups.v) drawFeat(F); for (const F of groups.l) drawFeat(F); ctx.strokeStyle = C.vedge; ctx.lineWidth = .8; ctx.stroke(); }
     if (groups.w.length) { ctx.beginPath(); for (const F of groups.w) drawFeat(F); ctx.strokeStyle = C.wish; ctx.lineWidth = 1; ctx.stroke(); }
     const byCode = code => fast.feats.filter(F => F.code === code && (F.c.big || (F.c.x * V[0] + F.c.y * V[1] + F.c.z * V[2]) >= -F.c.sinR));
     // pulses (country flash)
@@ -281,10 +292,20 @@ export class WorldMap {
     }
     // 3D shading + rim
     if (this.k > 2.6) return;
-    g = ctx.createRadialGradient(cx - r * .38, cy - r * .42, 0, cx - r * .1, cy - r * .1, r * 1.12);
+    this._light(ctx, cx, cy, r, C);
+  }
+  _light(ctx, cx, cy, r, C) {
+    // soft key light from upper-left + limb darkening
+    let g = ctx.createRadialGradient(cx - r * .38, cy - r * .42, 0, cx - r * .1, cy - r * .1, r * 1.12);
     g.addColorStop(0, C.light); g.addColorStop(.5, 'rgba(0,0,0,0)'); g.addColorStop(.82, 'rgba(0,0,0,0)'); g.addColorStop(1, C.shade);
     ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, r, 0, TAU); ctx.fill();
+    // terminator: gentle night side toward lower-right
+    if (C.night) { g = ctx.createLinearGradient(cx - r * .7, cy - r * .7, cx + r * .75, cy + r * .75); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(.58, 'rgba(0,0,0,0)'); g.addColorStop(1, C.night); ctx.fillStyle = g; ctx.fill(); }
+    // atmospheric haze just inside the limb
+    if (C.haze) { g = ctx.createRadialGradient(cx, cy, r * .78, cx, cy, r); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, C.haze); ctx.fillStyle = g; ctx.fill(); }
     ctx.beginPath(); ctx.arc(cx, cy, r - .5, 0, TAU); ctx.strokeStyle = C.rim; ctx.lineWidth = 1; ctx.stroke();
+    // rim light on the lit edge
+    if (C.rimlight) { g = ctx.createLinearGradient(cx - r, cy - r, cx + r * .2, cy + r * .2); g.addColorStop(0, C.rimlight); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.beginPath(); ctx.arc(cx, cy, r - 1, Math.PI * .72, Math.PI * 1.78); ctx.strokeStyle = g; ctx.lineWidth = 1.8; ctx.lineCap = 'round'; ctx.stroke(); ctx.lineCap = 'butt'; }
   }
 
   _drawMarker(xy, code, scale) {
@@ -567,9 +588,7 @@ export class WorldMap {
     ctx.beginPath(); for (const f of fm) path(f); ctx.fillStyle = col; ctx.fill(); ctx.restore();
     if (meta.a < 20000) { const q = p([meta.ll[1], meta.ll[0]]); ctx.beginPath(); ctx.arc(q[0], q[1], 7, 0, TAU); ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.stroke(); ctx.beginPath(); ctx.arc(q[0], q[1], 2.4, 0, TAU); ctx.fillStyle = col; ctx.fill(); }
     ctx.restore();
-    g = ctx.createRadialGradient(cx - r * .38, cy - r * .42, 0, cx - r * .1, cy - r * .1, r * 1.12); g.addColorStop(0, C.light); g.addColorStop(.5, 'rgba(0,0,0,0)'); g.addColorStop(.82, 'rgba(0,0,0,0)'); g.addColorStop(1, C.shade);
-    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, r, 0, TAU); ctx.fill();
-    ctx.beginPath(); ctx.arc(cx, cy, r - .5, 0, TAU); ctx.strokeStyle = C.rim; ctx.lineWidth = 1; ctx.stroke();
+    this._light(ctx, cx, cy, r, C);
   }
 
   // render a static poster map onto a given ctx (flat), used for sharing
